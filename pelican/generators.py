@@ -3,10 +3,12 @@ import errno
 import fnmatch
 import logging
 import os
+import concurrent.futures
 from collections import defaultdict
 from functools import partial
 from itertools import chain, groupby
 from operator import attrgetter
+
 
 from jinja2 import (BaseLoader, ChoiceLoader, Environment, FileSystemLoader,
                     PrefixLoader, TemplateNotFound)
@@ -550,6 +552,7 @@ class ArticlesGenerator(CachingGenerator):
     def generate_tags(self, write):
         """Generate Tags pages."""
         tag_template = self.get_template('tag')
+
         for tag, articles in self.tags.items():
             dates = [article for article in self.dates if article in articles]
             write(tag.save_as, tag_template, self.context, tag=tag,
@@ -560,12 +563,14 @@ class ArticlesGenerator(CachingGenerator):
     def generate_categories(self, write):
         """Generate category pages."""
         category_template = self.get_template('category')
+
         for cat, articles in self.categories:
             dates = [article for article in self.dates if article in articles]
             write(cat.save_as, category_template, self.context, url=cat.url,
                   category=cat, articles=articles, dates=dates,
                   template_name='category', blog=True, page_name=cat.page_name,
                   all_articles=self.articles)
+
 
     def generate_authors(self, write):
         """Generate Author pages."""
@@ -592,15 +597,16 @@ class ArticlesGenerator(CachingGenerator):
 
         # to minimize the number of relative path stuff modification
         # in writer, articles pass first
-        self.generate_articles(write)
-        self.generate_period_archives(write)
-        self.generate_direct_templates(write)
+        with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
+            executor.submit(self.generate_articles, write)
+            executor.submit(self.generate_period_archives, write)
+            executor.submit(self.generate_direct_templates, write)
 
-        # and subfolders after that
-        self.generate_tags(write)
-        self.generate_categories(write)
-        self.generate_authors(write)
-        self.generate_drafts(write)
+            # and subfolders after that
+            executor.submit(self.generate_tags, write)
+            executor.submit(self.generate_categories, write)
+            executor.submit(self.generate_authors, write)
+            executor.submit(self.generate_drafts, write)
 
     def generate_context(self):
         """Add the articles into the shared context"""
