@@ -3,10 +3,12 @@ import errno
 import fnmatch
 import logging
 import os
+import concurrent.futures
 from collections import defaultdict
 from functools import partial
 from itertools import chain, groupby
 from operator import attrgetter
+
 
 from jinja2 import (BaseLoader, ChoiceLoader, Environment, FileSystemLoader,
                     PrefixLoader, TemplateNotFound)
@@ -550,22 +552,28 @@ class ArticlesGenerator(CachingGenerator):
     def generate_tags(self, write):
         """Generate Tags pages."""
         tag_template = self.get_template('tag')
-        for tag, articles in self.tags.items():
-            dates = [article for article in self.dates if article in articles]
-            write(tag.save_as, tag_template, self.context, tag=tag,
-                  url=tag.url, articles=articles, dates=dates,
-                  template_name='tag', blog=True, page_name=tag.page_name,
-                  all_articles=self.articles)
+        with concurrent.futures.ThreadPoolExecutor() as executor:
+            for tag, articles in self.tags.items():
+                print(f'Tag: {tag}')  # fsimo
+                dates = [article for article in self.dates if article in articles]
+                f = executor.submit(write, tag.save_as, tag_template, self.context, tag=tag,
+                      url=tag.url, articles=articles, dates=dates,
+                      template_name='tag', blog=True, page_name=tag.page_name,
+                      all_articles=self.articles)
+        print('End concurrent for tags')
 
     def generate_categories(self, write):
         """Generate category pages."""
         category_template = self.get_template('category')
-        for cat, articles in self.categories:
-            dates = [article for article in self.dates if article in articles]
-            write(cat.save_as, category_template, self.context, url=cat.url,
-                  category=cat, articles=articles, dates=dates,
-                  template_name='category', blog=True, page_name=cat.page_name,
-                  all_articles=self.articles)
+        with concurrent.futures.ThreadPoolExecutor() as executor:
+            for cat, articles in self.categories:
+                print(f'Cat: {cat}')  # fsimo
+                dates = [article for article in self.dates if article in articles]
+                f = executor.submit(write,cat.save_as, category_template, self.context, url=cat.url,
+                      category=cat, articles=articles, dates=dates,
+                      template_name='category', blog=True, page_name=cat.page_name,
+                      all_articles=self.articles)
+        print('End concurrent for cats')
 
     def generate_authors(self, write):
         """Generate Author pages."""
