@@ -4,6 +4,8 @@ import fnmatch
 import logging
 import os
 import concurrent.futures
+import multiprocessing as mp
+from multiprocessing import Pool, Value, Array
 from collections import defaultdict
 from functools import partial
 from itertools import chain, groupby
@@ -22,7 +24,9 @@ from pelican.utils import (DateFormatter, copy, mkdir_p, order_content,
 
 
 logger = logging.getLogger(__name__)
-
+MAX_WORKERS = mp.cpu_count() - 1 if mp.cpu_count() > 1 else 1
+# MAX_WORKERS = 16
+print(f'Max workers: {MAX_WORKERS}')
 
 class PelicanTemplateNotFound(Exception):
     pass
@@ -500,32 +504,35 @@ class ArticlesGenerator(CachingGenerator):
             `key` and written to `save_as`.
             """
             # `dates` is already sorted by date
-            for _period, group in groupby(dates, key=key):
-                archive = list(group)
-                articles = [a for a in self.articles if a in archive]
-                # arbitrarily grab the first date so that the usual
-                # format string syntax can be used for specifying the
-                # period archive dates
-                date = archive[0].date
-                save_as = save_as_fmt.format(date=date)
-                url = url_fmt.format(date=date)
-                context = self.context.copy()
+            with concurrent.futures.ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
+                for _period, group in groupby(dates, key=key):
+                    archive = list(group)
+                    articles = [a for a in self.articles if a in archive]
+                    # arbitrarily grab the first date so that the usual
+                    # format string syntax can be used for specifying the
+                    # period archive dates
+                    date = archive[0].date
+                    save_as = save_as_fmt.format(date=date)
+                    url = url_fmt.format(date=date)
+                    context = self.context.copy()
 
-                if key == period_date_key['year']:
-                    context["period"] = (_period,)
-                else:
-                    month_name = calendar.month_name[_period[1]]
-                    if key == period_date_key['month']:
-                        context["period"] = (_period[0],
-                                             month_name)
+                    if key == period_date_key['year']:
+                        context["period"] = (_period,)
                     else:
-                        context["period"] = (_period[0],
-                                             month_name,
-                                             _period[2])
+                        month_name = calendar.month_name[_period[1]]
+                        if key == period_date_key['month']:
+                            context["period"] = (_period[0],
+                                                 month_name)
+                        else:
+                            context["period"] = (_period[0],
+                                                 month_name,
+                                                 _period[2])
 
-                write(save_as, template, context, articles=articles,
-                      dates=archive, template_name='period_archives',
-                      blog=True, url=url, all_articles=self.articles)
+                    f = executor.submit(write,save_as, template, context, articles=articles,
+                          dates=archive, template_name='period_archives',
+                          blog=True, url=url, all_articles=self.articles)
+
+            print('End concurrent for period')
 
         for period in 'year', 'month', 'day':
             save_as = period_save_as[period]
@@ -552,25 +559,28 @@ class ArticlesGenerator(CachingGenerator):
     def generate_tags(self, write):
         """Generate Tags pages."""
         tag_template = self.get_template('tag')
-
-        for tag, articles in self.tags.items():
-            dates = [article for article in self.dates if article in articles]
-            write(tag.save_as, tag_template, self.context, tag=tag,
-                  url=tag.url, articles=articles, dates=dates,
-                  template_name='tag', blog=True, page_name=tag.page_name,
-                  all_articles=self.articles)
+        with concurrent.futures.ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
+            for tag, articles in self.tags.items():
+                print(f'Tag: {tag}')  # fsimo
+                dates = [article for article in self.dates if article in articles]
+                f = executor.submit(write, tag.save_as, tag_template, self.context, tag=tag,
+                      url=tag.url, articles=articles, dates=dates,
+                      template_name='tag', blog=True, page_name=tag.page_name,
+                      all_articles=self.articles)
+        print('End concurrent for tags')
 
     def generate_categories(self, write):
         """Generate category pages."""
         category_template = self.get_template('category')
-
-        for cat, articles in self.categories:
-            dates = [article for article in self.dates if article in articles]
-            write(cat.save_as, category_template, self.context, url=cat.url,
-                  category=cat, articles=articles, dates=dates,
-                  template_name='category', blog=True, page_name=cat.page_name,
-                  all_articles=self.articles)
-
+        with concurrent.futures.ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
+            for cat, articles in self.categories:
+                print(f'Cat: {cat}')  # fsimo
+                dates = [article for article in self.dates if article in articles]
+                f = executor.submit(write,cat.save_as, category_template, self.context, url=cat.url,
+                      category=cat, articles=articles, dates=dates,
+                      template_name='category', blog=True, page_name=cat.page_name,
+                      all_articles=self.articles)
+        print('End concurrent for cats')
 
     def generate_authors(self, write):
         """Generate Author pages."""
@@ -597,16 +607,15 @@ class ArticlesGenerator(CachingGenerator):
 
         # to minimize the number of relative path stuff modification
         # in writer, articles pass first
-        with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
-            executor.submit(self.generate_articles, write)
-            executor.submit(self.generate_period_archives, write)
-            executor.submit(self.generate_direct_templates, write)
+        self.generate_articles(write)
+        self.generate_period_archives(write)
+        self.generate_direct_templates(write)
 
-            # and subfolders after that
-            executor.submit(self.generate_tags, write)
-            executor.submit(self.generate_categories, write)
-            executor.submit(self.generate_authors, write)
-            executor.submit(self.generate_drafts, write)
+        # and subfolders after that
+        self.generate_tags(write)
+        self.generate_categories(write)
+        self.generate_authors(write)
+        self.generate_drafts(write)
 
     def generate_context(self):
         """Add the articles into the shared context"""
