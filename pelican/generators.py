@@ -26,7 +26,7 @@ from pelican.utils import (DateFormatter, copy, mkdir_p, order_content,
 logger = logging.getLogger(__name__)
 MAX_WORKERS = mp.cpu_count() - 1 if mp.cpu_count() > 1 else 1
 # MAX_WORKERS = 16
-print(f'Max workers: {MAX_WORKERS}')
+print("Max workers: {}".format(MAX_WORKERS))
 
 class PelicanTemplateNotFound(Exception):
     pass
@@ -504,7 +504,7 @@ class ArticlesGenerator(CachingGenerator):
             `key` and written to `save_as`.
             """
             # `dates` is already sorted by date
-            with concurrent.futures.ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
+            with concurrent.futures.ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor: # fsimo
                 for _period, group in groupby(dates, key=key):
                     archive = list(group)
                     articles = [a for a in self.articles if a in archive]
@@ -532,8 +532,6 @@ class ArticlesGenerator(CachingGenerator):
                           dates=archive, template_name='period_archives',
                           blog=True, url=url, all_articles=self.articles)
 
-            print('End concurrent for period')
-
         for period in 'year', 'month', 'day':
             save_as = period_save_as[period]
             url = period_url[period]
@@ -559,28 +557,24 @@ class ArticlesGenerator(CachingGenerator):
     def generate_tags(self, write):
         """Generate Tags pages."""
         tag_template = self.get_template('tag')
-        with concurrent.futures.ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
+        with concurrent.futures.ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor: # fsimo
             for tag, articles in self.tags.items():
-                print(f'Tag: {tag}')  # fsimo
                 dates = [article for article in self.dates if article in articles]
                 f = executor.submit(write, tag.save_as, tag_template, self.context, tag=tag,
                       url=tag.url, articles=articles, dates=dates,
                       template_name='tag', blog=True, page_name=tag.page_name,
                       all_articles=self.articles)
-        print('End concurrent for tags')
 
     def generate_categories(self, write):
         """Generate category pages."""
         category_template = self.get_template('category')
-        with concurrent.futures.ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
+        with concurrent.futures.ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor: # fsimo
             for cat, articles in self.categories:
-                print(f'Cat: {cat}')  # fsimo
                 dates = [article for article in self.dates if article in articles]
                 f = executor.submit(write,cat.save_as, category_template, self.context, url=cat.url,
                       category=cat, articles=articles, dates=dates,
                       template_name='category', blog=True, page_name=cat.page_name,
                       all_articles=self.articles)
-        print('End concurrent for cats')
 
     def generate_authors(self, write):
         """Generate Author pages."""
